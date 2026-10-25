@@ -185,6 +185,18 @@ MODEL_PATH=plastic-ai-project/model/plastic_model.h5
 MAX_CONTENT_LENGTH_MB=8
 RECYCLER_RADIUS_METERS=50000
 
+# SortBot is local-only and disabled until wiring and calibration are confirmed.
+SORTBOT_ENABLED=false
+SORTBOT_SERIAL_PORT=
+SORTBOT_BAUD_RATE=9600
+SORTBOT_CONFIDENCE_THRESHOLD=50
+SORTBOT_SERIAL_TIMEOUT=1
+SORTBOT_OPERATION_TIMEOUT=180
+SORTBOT_BIN_1_COMMAND=T1
+SORTBOT_BIN_2_COMMAND=T2
+SORTBOT_BIN_3_COMMAND=T3
+SORTBOT_BIN_4_COMMAND=T4
+
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_ANON_KEY=your_anon_key_here
 ```
@@ -228,6 +240,54 @@ gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 180
 ### 5) Camera not opening on mobile LAN
 - Some mobile browsers restrict camera on non-HTTPS origins.
 - Use upload mode on HTTP LAN or use an HTTPS tunnel for camera testing.
+
+## SortBot Bluetooth integration (local Windows prototype)
+
+The classifier can send the predicted bin to an Arduino-connected HC-05 over
+the Windows Bluetooth virtual COM port. This integration is deliberately
+manual and disabled by default:
+
+1. Pair the HC-05 with Windows and identify its outgoing COM port in
+   **Settings > Bluetooth & devices > Devices > More Bluetooth settings >
+   COM Ports** (or Device Manager).
+2. Run Flask on the same Windows laptop as the paired HC-05. A Render-hosted
+   process cannot access a laptop's COM port.
+3. Set `SORTBOT_ENABLED=true`, `SORTBOT_SERIAL_PORT=COM5` (replace `COM5`),
+   the baud rate used by the Arduino firmware, and the four bin commands if
+   your firmware uses different text. `9600` is only the prototype default.
+4. Restart Flask, sign in, classify an item, verify the displayed target bin,
+   and click **Send to SortBot**.
+
+The default command contract is newline-terminated text:
+
+| Predicted class | Default physical bin | Command |
+|---|---:|---|
+| PET | 1 | `T1\n` |
+| HDPE, LDPE | 2 | `T2\n` |
+| PP | 3 | `T3\n` |
+| PS, PVC, OTHER | 4 | `T4\n` |
+
+This is a configurable prototype grouping, not a universal recycling
+standard. The existing Arduino firmware must accept these commands before
+motor movement is enabled. The app reports `command_sent`; a successful
+serial write is not treated as proof that the hardware completed sorting.
+If no completion acknowledgement is integrated, the app releases its
+duplicate-command lock after `SORTBOT_OPERATION_TIMEOUT` seconds.
+Keep the mode manual until the Arduino command and safety behavior have been
+verified with the motor disconnected. Do not expose the local Flask port to
+the public internet while hardware control is enabled.
+
+The protected routes are:
+
+- `GET /sortbot/status` - local serial configuration and connection status.
+- `POST /sort` - sends the mapped command after the confidence and mapping
+  checks. Body: `{"type":"PET","confidence":92.4}`.
+- `GET /sort/status/<operation_id>` - reads the in-memory operation record.
+
+Operation records are intentionally in memory for this local prototype and
+are lost when Flask restarts. The Arduino firmware remains responsible for
+the physical sorting sequence, bin sensors, duplicate-command handling, and
+emergency stop behavior.
 
 ## Acknowledgments
 - TensorFlow/Keras for model inference tooling

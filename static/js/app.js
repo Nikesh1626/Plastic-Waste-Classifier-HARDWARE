@@ -1,6 +1,8 @@
 // app.js — Shared prediction logic and result rendering
 // Loaded first so camera.js, upload.js and map.js can call sendForPrediction().
 
+let currentPrediction = null;
+
 /**
  * Safely escapes HTML to prevent XSS when rendering API-sourced text.
  */
@@ -88,6 +90,10 @@ async function sendForPrediction(imageData) {
 function displayResult(data) {
   const resultCard = document.getElementById("resultCard");
   const placeholderCard = document.getElementById("placeholderCard");
+  currentPrediction = {
+    type: String(data.type || ""),
+    confidence: parseFloat(data.confidence) || 0,
+  };
 
   // Plastic type badge
   document.getElementById("plasticTypeLabel").textContent = escapeHtml(
@@ -144,6 +150,8 @@ function displayResult(data) {
     aiText.textContent = "AI advice unavailable.";
   }
 
+  updateSortBotTarget(data.sortbot);
+  refreshSortBotStatus();
   placeholderCard.style.display = "none";
   resultCard.style.display = "block";
 
@@ -151,6 +159,93 @@ function displayResult(data) {
   if (window.innerWidth < 992) {
     resultCard.scrollIntoView({ behavior: "smooth", block: "start" });
   }
+
+  function updateSortBotTarget(target) {
+    const targetEl = document.getElementById("sortbotTarget");
+    const button = document.getElementById("sortbotSortBtn");
+    if (!targetEl || !button) return;
+
+    if (target && target.bin) {
+      targetEl.textContent = `Predicted ${currentPrediction.type} is assigned to Bin ${target.bin}.`;
+    } else {
+      targetEl.textContent = "This prediction is not mapped to a physical bin.";
+    }
+
+    button.disabled = !target?.eligible;
+    if (target?.reason) {
+      setSortBotMessage(target.reason, "text-on-secondary-container");
+    }
+  }
+
+  async function refreshSortBotStatus() {
+    const stateEl = document.getElementById("sortbotConnectionState");
+    if (!stateEl) return;
+
+    if (window.authRequireUser) {
+      const allowed = await window.authRequireUser();
+      if (!allowed) {
+        stateEl.textContent = "Sign in required";
+        return;
+      }
+    }
+
+    const authToken = window.getAuthToken ? window.getAuthToken() : "";
+    try {
+      const response = await fetch("/sortbot/status", {
+        headers: { Authorization: authToken ? `Bearer ${authToken}` : "" },
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Status unavailable.");
+      stateEl.textContent = data.connected ? "Bluetooth connected" : "Not connected";
+      stateEl.className = data.connected
+        ? "text-xs font-semibold text-primary"
+        : "text-xs font-semibold text-on-secondary-container";
+      if (!data.connected && data.message) setSortBotMessage(data.message);
+    } catch (error) {
+      stateEl.textContent = "Status unavailable";
+      setSortBotMessage(error.message || "Unable to read SortBot status.");
+    }
+  }
+
+  function setSortBotMessage(message, className = "text-on-secondary-container") {
+    const messageEl = document.getElementById("sortbotStatusMessage");
+    if (!messageEl) return;
+    messageEl.textContent = message;
+    messageEl.className = `text-sm mb-0 ${className}`;
+  }
+
+  async function sortCurrentPrediction() {
+    const button = document.getElementById("sortbotSortBtn");
+    if (!button || !currentPrediction) return;
+
+    if (window.authRequireUser) {
+      const allowed = await window.authRequireUser();
+      if (!allowed) return;
+    }
+
+    button.disabled = true;
+    setSortBotMessage("Sending the selected bin command...");
+    const authToken = window.getAuthToken ? window.getAuthToken() : "";
+
+    try {
+      const response = await fetch("/sort", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: authToken ? `Bearer ${authToken}` : "",
+        },
+        body: JSON.stringify(currentPrediction),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "SortBot command failed.");
+      setSortBotMessage(data.message || "Command sent to SortBot.");
+    } catch (error) {
+      setSortBotMessage(error.message || "Unable to send the SortBot command.", "text-red-700");
+      refreshSortBotStatus();
+    }
+  }
+
+  window.sortCurrentPrediction = sortCurrentPrediction;
 }
 
 function showPredictionError(safeMessage) {

@@ -6,9 +6,11 @@ import numpy as np
 import cv2
 import base64
 import requests
+from tensorflow.keras.layers import DepthwiseConv2D
 from tensorflow.keras.models import load_model
 from services.gemini_service import get_classification_guidance, get_home_insights
 from services.recycler_service import get_nearby_recyclers
+from services.sortbot_service import sortbot_service
 
 try:
     from dotenv import load_dotenv
@@ -38,7 +40,18 @@ SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "").strip()
 SUPABASE_USERINFO_URL = (
     f"{SUPABASE_URL.rstrip('/')}/auth/v1/user" if SUPABASE_URL else ""
 )
-model = load_model(MODEL_PATH)
+
+class _LegacyDepthwiseConv2D(DepthwiseConv2D):
+    def __init__(self, *args, groups=1, **kwargs):
+        if groups != 1:
+            raise ValueError("Only groups=1 is supported for the bundled model.")
+        super().__init__(*args, **kwargs)
+
+
+model = load_model(
+    MODEL_PATH,
+    custom_objects={"DepthwiseConv2D": _LegacyDepthwiseConv2D},
+)
 # ⚠️ MUST MATCH training order exactly
 CLASS_NAMES = ['HDPE', 'LDPE', 'OTHER', 'PET', 'PP', 'PS', 'PVC']
 
@@ -134,6 +147,7 @@ def predict():
         return jsonify({
             "type": label,
             "confidence": round(confidence, 2),
+            "sortbot": sortbot_service.prediction_target(label, confidence),
             "reuse": guidance.get("reuse_ideas", []),
             "recycle_instructions": guidance.get("recycling_instructions", []),
             "ai_advice": guidance.get("ai_advice", ""),
@@ -168,6 +182,41 @@ def recyclers():
     except Exception:
         app.logger.exception("Recycler lookup failed")
         return jsonify({"error": "Unable to fetch recycling centres right now."}), 500
+
+
+@app.route("/sortbot/status", methods=["GET"])
+@require_auth
+def sortbot_status():
+    return jsonify(sortbot_service.status())
+
+
+@app.route("/sort", methods=["POST"])
+@require_auth
+def sort():
+    try:
+        body = request.get_json(silent=True) or {}
+        plastic_type = body.get("type")
+        confidence = float(body["confidence"])
+        if not isinstance(plastic_type, str) or not plastic_type.strip():
+            return jsonify({"error": "A predicted plastic type is required."}), 400
+        operation = sortbot_service.send_sort(plastic_type, confidence)
+        return jsonify(operation), 202
+    except (KeyError, TypeError, ValueError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 409
+    except Exception:
+        app.logger.exception("SortBot command failed")
+        return jsonify({"error": "Unable to send the SortBot command."}), 500
+
+
+@app.route("/sort/status/<operation_id>", methods=["GET"])
+@require_auth
+def sort_status(operation_id):
+    operation = sortbot_service.get_operation(operation_id)
+    if not operation:
+        return jsonify({"error": "Sorting operation not found."}), 404
+    return jsonify(operation)
 
 
 @app.route("/home-insights", methods=["GET"])

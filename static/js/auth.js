@@ -14,6 +14,7 @@ function authElements() {
     modal: document.getElementById("authModal"),
     modalCloseBtn: document.getElementById("authModalCloseBtn"),
     googleSignInBtn: document.getElementById("googleSignInBtn"),
+    modalMessage: document.getElementById("authModalMessage"),
   };
 }
 
@@ -81,17 +82,37 @@ function hideAuthModal() {
 window.hideAuthModal = hideAuthModal;
 
 async function signInWithGoogle() {
-  if (!supabaseClient) return;
-  await supabaseClient.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: window.location.origin + window.location.pathname,
-      queryParams: {
-        access_type: "offline",
-        prompt: "consent",
+  const { googleSignInBtn, modalMessage } = authElements();
+  if (!supabaseClient) {
+    if (modalMessage) {
+      modalMessage.textContent =
+        "Google sign-in is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in the server .env file.";
+    }
+    return;
+  }
+
+  if (googleSignInBtn) googleSignInBtn.disabled = true;
+  try {
+    const { error } = await supabaseClient.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin + window.location.pathname,
+        queryParams: {
+          access_type: "offline",
+          prompt: "consent",
+        },
       },
-    },
-  });
+    });
+    if (error) throw error;
+  } catch (error) {
+    console.error("Google sign-in failed:", error);
+    if (modalMessage) {
+      modalMessage.textContent =
+        error?.message || "Google sign-in could not be started. Please try again.";
+    }
+  } finally {
+    if (googleSignInBtn) googleSignInBtn.disabled = false;
+  }
 }
 
 async function signOutSupabase() {
@@ -124,13 +145,23 @@ async function initAuth() {
     authNavArea,
     modalCloseBtn,
     googleSignInBtn,
+    modalMessage,
   } = authElements();
 
   if (!supabaseUrl || !supabaseAnonKey || !window.supabase?.createClient) {
+    if (modalMessage) {
+      modalMessage.textContent = !window.supabase?.createClient
+        ? "The Supabase client could not load. Check your internet connection and reload the page."
+        : "Google sign-in is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY in the server .env file.";
+    }
     if (signInBtn) {
       signInBtn.disabled = true;
       signInBtn.textContent = "Auth unavailable";
       signInBtn.title = "Set SUPABASE_URL and SUPABASE_ANON_KEY in .env";
+    }
+    if (googleSignInBtn) {
+      googleSignInBtn.disabled = true;
+      googleSignInBtn.textContent = "Google sign-in unavailable";
     }
     return;
   }

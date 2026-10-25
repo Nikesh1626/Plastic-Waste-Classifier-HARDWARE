@@ -23,3 +23,23 @@ services:
         value: gemini-flash-lite-latest
       - key: GEMINI_API_KEY
         sync: false
+      - key: SORTBOT_ENABLED
+        value: "false"
+      - key: SORTBOT_SERIAL_PORT
+        value: ""
+      - key: SORTBOT_BAUD_RATE
+        value: "9600"
+      - key: SORTBOT_CONFIDENCE_THRESHOLD
+        value: "50"
+      - key: SORTBOT_SERIAL_TIMEOUT
+        value: "1"
+      - key: SORTBOT_OPERATION_TIMEOUT
+        value: "180"
+      - key: SORTBOT_BIN_1_COMMAND
+        value: "T1"
+      - key: SORTBOT_BIN_2_COMMAND
+        value: "T2"
+      - key: SORTBOT_BIN_3_COMMAND
+        value: "T3"
+      - key: SORTBOT_BIN_4_COMMAND
+        value: "T4"
